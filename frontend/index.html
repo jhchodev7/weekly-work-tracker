@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GRID SYNC 일정 레이더</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com/3.4.5"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['Orbitron', 'Noto Sans KR', 'sans-serif'],
+          sans: ['Noto Sans KR', 'sans-serif'],
+          mono: ['JetBrains Mono', 'monospace'],
+        },
+        colors: {
+          void: '#05060d',
+          panel: '#0b0f1c',
+          neon: { cyan: '#22e5ff', pink: '#ff2bd6', red: '#ff2e55', green: '#2bff88', amber: '#ffb020' },
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(255,43,214,.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 20%, rgba(34,229,255,.10), transparent 60%),
+      #05060d;
+    color: #d6e2ff;
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(34,229,255,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34,229,255,.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .panel {
+    background: linear-gradient(180deg, rgba(14,20,38,.92), rgba(8,11,22,.92));
+    border: 1px solid rgba(34,229,255,.18);
+    box-shadow: 0 0 0 1px rgba(255,43,214,.04), 0 0 30px rgba(34,229,255,.06) inset;
+    clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+  }
+  .glow-text { text-shadow: 0 0 12px rgba(34,229,255,.7); }
+  .sweep { transform-origin: 260px 260px; animation: spin 4s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .scanline::after {
+    content: ''; position: fixed; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0 1px, transparent 1px 3px);
+  }
+  .modal-in { animation: modalIn .28s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(.96); } to { opacity: 1; transform: none; } }
+  .cursor::after { content: '▋'; animation: blink 1s steps(1) infinite; color: #2bff88; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .cell-hot { box-shadow: 0 0 12px rgba(255,46,85,.8); }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(34,229,255,.3); }
+</style>
+</head>
+<body class="min-h-screen font-sans scanline">
+<div id="root"></div>
+
+<script>
+  // 서버 없이(file://로 열었을 때) 보여줄 데모 데이터 — tools/build_offline.py 로 갱신
+  window.OFFLINE_DATA = /*__OFFLINE__*/{"summary": "이번 주 고위험 일정 충돌 3건이 감지되었습니다. 설비·시스템 작업과 이에 의존하는 업무가 겹치는 구간을 우선 조정하세요.", "tasks": [{"id": "t1", "dept": "경영지원", "title": "주간 경영회의", "day": "월요일", "start": 10, "end": 11, "isConflict": false, "conflictWith": [], "severity": "none", "reason": "", "suggestedDay": "월요일", "suggestion": ""}, {"id": "t2", "dept": "발전", "title": "주간 운전 계획 회의", "day": "월요일", "start": 14, "end": 15, "isConflict": false, "conflictWith": [], "severity": "none", "reason": "", "suggestedDay": "월요일", "suggestion": ""}, {"id": "t3", "dept": "기계", "title": "터빈 윤활유 성분 분석", "day": "화요일", "start": 9, "end": 12, "isConflict": false, "conflictWith": [], "severity": "none", "reason": "", "suggestedDay": "화요일", "suggestion": ""}, {"id": "t4", "dept": "안전", "title": "전 직원 산업안전 교육", "day": "화요일", "start": 13, "end": 15, "isConflict": false, "conflictWith": [], "severity": "none", "reason": "", "suggestedDay": "화요일", "suggestion": ""}, {"id": "t5", "dept": "ICT", "title": "전산망 서버 점검", "day": "수요일", "start": 9, "end": 13, "isConflict": true, "conflictWith": ["t6"], "severity": "high", "reason": "전산망 서버 점검과(와) 외부감사 현장실사 겹침 — 수요일 10시~12시에 ICT팀 작업으로 설비·시스템이 중단된 상태에서 감사팀 업무가 진행되어 업무 중단 및 안전사고 위험이 있습니다.", "suggestedDay": "수요일", "suggestion": "'외부감사 현장실사'을(를) 월요일 같은 시간대로 옮기는 것을 제안합니다. 월요일은(는) 설비·시스템 작업이 없어 안정적이고 전사 업무 밀도가 낮습니다."}, {"id": "t6", "dept": "감사", "title": "외부감사 현장실사", "day": "수요일", "start": 10, "end": 12, "isConflict": true, "conflictWith": ["t5"], "severity": "high", "reason": "전산망 서버 점검과(와) 외부감사 현장실사 겹침 — 수요일 10시~12시에 ICT팀 작업으로 설비·시스템이 중단된 상태에서 감사팀 업무가 진행되어 업무 중단 및 안전사고 위험이 있습니다.", "suggestedDay": "월요일", "suggestion": "'외부감사 현장실사'을(를) 월요일 같은 시간대로 옮기는 것을 제안합니다. 월요일은(는) 설비·시스템 작업이 없어 안정적이고 전사 업무 밀도가 낮습니다."}, {"id": "t7", "dept": "안전", "title": "소방 합동훈련", "day": "목요일", "start": 10, "end": 12, "isConflict": false, "conflictWith": [], "severity": "none", "reason": "", "suggestedDay": "목요일", "suggestion": ""}, {"id": "t8", "dept": "전기", "title": "변전소 차단기 교체(정전 작업)", "day": "목요일", "start": 13, "end": 17, "isConflict": true, "conflictWith": ["t9"], "severity": "high", "reason": "변전소 차단기 교체(정전 작업)과(와) 2호기 발전기 출력 시험 겹침 — 목요일 14시~17시에 전기팀 작업으로 설비·시스템이 중단된 상태에서 발전팀 업무가 진행되어 업무 중단 및 안전사고 위험이 있습니다.", "suggestedDay": "목요일", "suggestion": "'2호기 발전기 출력 시험'을(를) 월요일 같은 시간대로 옮기는 것을 제안합니다. 월요일은(는) 설비·시스템 작업이 없어 안정적이고 전사 업무 밀도가 낮습니다."}, {"id": "t9", "dept": "발전", "title": "2호기 발전기 출력 시험", "day": "목요일", "start": 14, "end": 17, "isConflict": true, "conflictWith": ["t8"], "severity": "high", "reason": "변전소 차단기 교체(정전 작업)과(와) 2호기 발전기 출력 시험 겹침 — 목요일 14시~17시에 전기팀 작업으로 설비·시스템이 중단된 상태에서 발전팀 업무가 진행되어 업무 중단 및 안전사고 위험이 있습니다.", "suggestedDay": "월요일", "suggestion": "'2호기 발전기 출력 시험'을(를) 월요일 같은 시간대로 옮기는 것을 제안합니다. 월요일은(는) 설비·시스템 작업이 없어 안정적이고 전사 업무 밀도가 낮습니다."}, {"id": "t10", "dept": "기계", "title": "보일러 급수펌프 정비", "day": "금요일", "start": 9, "end": 12, "isConflict": false, "conflictWith": [], "severity": "none", "reason": "", "suggestedDay": "금요일", "suggestion": ""}, {"id": "t11", "dept": "ICT", "title": "ERP 시스템 업데이트", "day": "금요일", "start": 13, "end": 17, "isConflict": true, "conflictWith": ["t12"], "severity": "high", "reason": "ERP 시스템 업데이트과(와) 월말 결산 전표 마감 겹침 — 금요일 14시~17시에 ICT팀 작업으로 설비·시스템이 중단된 상태에서 경영지원팀 업무가 진행되어 업무 중단 및 안전사고 위험이 있습니다.", "suggestedDay": "금요일", "suggestion": "'월말 결산 전표 마감'을(를) 화요일 같은 시간대로 옮기는 것을 제안합니다. 화요일은(는) 설비·시스템 작업이 없어 안정적이고 전사 업무 밀도가 낮습니다."}, {"id": "t12", "dept": "경영지원", "title": "월말 결산 전표 마감", "day": "금요일", "start": 14, "end": 17, "isConflict": true, "conflictWith": ["t11"], "severity": "high", "reason": "ERP 시스템 업데이트과(와) 월말 결산 전표 마감 겹침 — 금요일 14시~17시에 ICT팀 작업으로 설비·시스템이 중단된 상태에서 경영지원팀 업무가 진행되어 업무 중단 및 안전사고 위험이 있습니다.", "suggestedDay": "화요일", "suggestion": "'월말 결산 전표 마감'을(를) 화요일 같은 시간대로 옮기는 것을 제안합니다. 화요일은(는) 설비·시스템 작업이 없어 안정적이고 전사 업무 밀도가 낮습니다."}], "engine": "오프라인 데모 데이터"}/*__END__*/;
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
+
+const DAYS = ['월요일', '화요일', '수요일', '목요일', '금요일'];
+const HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17];
+const DEPTS = ['감사', '안전', 'ICT', '경영지원', '발전', '전기', '기계'];
+const DEPT_COLOR = {
+  감사: '#a78bfa', 안전: '#facc15', ICT: '#22e5ff', 경영지원: '#60a5fa',
+  발전: '#ff2bd6', 전기: '#fb923c', 기계: '#94a3b8',
+};
+const CX = 260, CY = 260;
+
+// ---------- 레이더 좌표: 부서 = 각도 섹터, 요일 = 반지름 링 ----------
+function layout(tasks) {
+  const slot = {};
+  return tasks.map((t) => {
+    const di = Math.max(0, DEPTS.indexOf(t.dept));
+    const ring = DAYS.indexOf(t.day);
+    const key = `${di}-${ring}`;
+    const k = (slot[key] = (slot[key] ?? -1) + 1);
+    const sector = (2 * Math.PI) / DEPTS.length;
+    const angle = -Math.PI / 2 + di * sector + sector / 2 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.16;
+    const r = 52 + ring * 44;
+    return { ...t, x: CX + r * Math.cos(angle), y: CY + r * Math.sin(angle) };
+  });
+}
+
+function heat(tasks) {
+  return DAYS.map((day) =>
+    HOURS.map((h) => {
+      const active = tasks.filter((t) => t.day === day && t.start <= h && h < t.end);
+      return { day, h, active, conflict: active.some((t) => t.isConflict) };
+    })
+  );
+}
+
+function cellStyle(c) {
+  if (c.conflict) return { background: '#b0002a', borderColor: '#ff2e55' };
+  const n = c.active.length;
+  if (n === 0) return { background: 'rgba(43,255,136,.22)', borderColor: 'rgba(43,255,136,.35)' };
+  if (n === 1) return { background: 'rgba(43,255,136,.45)', borderColor: 'rgba(43,255,136,.6)' };
+  if (n === 2) return { background: 'rgba(255,176,32,.55)', borderColor: 'rgba(255,176,32,.8)' };
+  return { background: 'rgba(255,46,85,.75)', borderColor: '#ff2e55' };
+}
+
+// ---------- API ----------
+async function fetchAnalysis(tasks) {
+  const res = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(tasks ? { tasks } : {}),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ---------- 컴포넌트 ----------
+function Header({ data, stats, loading, onAnalyze, onEdit }) {
+  return (
+    <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 mb-6">
+      <div>
+        <div className="font-mono text-xs text-neon-pink tracking-[.3em]">// POWER PLANT OPS · WEEKLY</div>
+        <h1 className="font-display font-black text-3xl md:text-4xl text-white glow-text tracking-wider">
+          GRID<span className="text-neon-cyan">SYNC</span>
+          <span className="ml-3 text-base md:text-lg font-sans font-bold text-slate-300 tracking-normal">전사 주간업무 레이더</span>
+        </h1>
+        <p className="mt-2 text-sm text-slate-400 max-w-2xl">{data?.summary ?? '주간업무 데이터를 분석하고 있습니다…'}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Stat label="TOTAL" value={stats.total} color="text-neon-cyan" />
+        <Stat label="CONFLICT" value={stats.conflicts} color="text-neon-red" pulse={stats.conflicts > 0} />
+        <Stat label="RESOLVED" value={stats.resolved} color="text-neon-green" />
+        <div className="flex flex-col gap-2">
+          <button onClick={onAnalyze} disabled={loading}
+            className="px-4 py-2 font-display text-xs tracking-widest border border-neon-cyan text-neon-cyan hover:bg-neon-cyan hover:text-void transition disabled:opacity-40">
+            {loading ? 'SCANNING…' : '▶ AI 재분석'}
+          </button>
+          <button onClick={onEdit}
+            className="px-4 py-2 font-display text-xs tracking-widest border border-neon-pink/60 text-neon-pink hover:bg-neon-pink hover:text-void transition">
+            ✎ 업무 입력
+          </button>
+        </div>
+      </div>
+      <div className="lg:hidden font-mono text-[10px] text-slate-500">ENGINE: {data?.engine}</div>
+    </header>
+  );
+}
+
+function Stat({ label, value, color, pulse }) {
+  return (
+    <div className="panel px-4 py-2 min-w-[92px]">
+      <div className="font-mono text-[10px] tracking-widest text-slate-500">{label}</div>
+      <div className={`font-display text-2xl font-bold ${color} ${pulse ? 'animate-pulse' : ''}`}>{value}</div>
+    </div>
+  );
+}
+
+function TaskList({ tasks, hover, setHover, onOpen }) {
+  return (
+    <div className="panel p-4 h-full flex flex-col min-h-0">
+      <PanelTitle tag="01" title="부서별 업무" />
+      <div className="overflow-y-auto pr-1 space-y-3 flex-1 min-h-0 max-h-[460px]">
+        {DEPTS.map((dept) => {
+          const list = tasks.filter((t) => t.dept === dept);
+          if (!list.length) return null;
+          return (
+            <div key={dept}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-2 h-2 rotate-45" style={{ background: DEPT_COLOR[dept], boxShadow: `0 0 8px ${DEPT_COLOR[dept]}` }} />
+                <span className="font-bold text-sm" style={{ color: DEPT_COLOR[dept] }}>{dept}</span>
+                <span className="font-mono text-[10px] text-slate-500">×{list.length}</span>
+              </div>
+              {list.map((t) => (
+                <button key={t.id}
+                  onMouseEnter={() => setHover(t.id)} onMouseLeave={() => setHover(null)}
+                  onClick={() => t.isConflict && onOpen(t)}
+                  className={`w-full text-left px-3 py-2 mb-1 border-l-2 transition flex items-center justify-between gap-2
+                    ${hover === t.id ? 'bg-white/5' : 'bg-white/[.02]'}
+                    ${t.isConflict ? 'border-neon-red cursor-pointer hover:bg-neon-red/10' : t.resolved ? 'border-neon-green' : 'border-slate-700 cursor-default'}`}>
+                  <span className="min-w-0">
+                    <span className="block text-sm text-slate-200 truncate">{t.title}</span>
+                    <span className="font-mono text-[11px] text-slate-500">{t.day.slice(0, 1)} {String(t.start).padStart(2, '0')}:00–{String(t.end).padStart(2, '0')}:00</span>
+                  </span>
+                  {t.isConflict && <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 bg-neon-red/20 text-neon-red border border-neon-red/50 animate-pulse">CONFLICT</span>}
+                  {t.resolved && <span className="shrink-0 font-mono text-[10px] px-1.5 py-0.5 bg-neon-green/10 text-neon-green border border-neon-green/40">MOVED</span>}
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Radar({ tasks, hover, setHover, onOpen, engine }) {
+  const nodes = useMemo(() => layout(tasks), [tasks]);
+  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const links = nodes.flatMap((n) => (n.isConflict ? n.conflictWith.filter((id) => id > n.id && byId[id]).map((id) => [n, byId[id]]) : []));
+  const sector = 360 / DEPTS.length;
+
+  return (
+    <div className="panel p-4 h-full">
+      <div className="flex justify-between items-center">
+        <PanelTitle tag="02" title="RADAR VIEW" />
+        <span className="hidden lg:block font-mono text-[10px] text-slate-500 mb-3">ENGINE: {engine}</span>
+      </div>
+      <svg viewBox="0 0 520 520" className="w-full max-w-[520px] mx-auto block select-none">
+        <defs>
+          <radialGradient id="bgGlow"><stop offset="0%" stopColor="#22e5ff" stopOpacity=".12" /><stop offset="100%" stopColor="#22e5ff" stopOpacity="0" /></radialGradient>
+          <linearGradient id="sweepGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#22e5ff" stopOpacity="0" /><stop offset="100%" stopColor="#22e5ff" stopOpacity=".35" />
+          </linearGradient>
+          <filter id="glow"><feGaussianBlur stdDeviation="3" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+        </defs>
+        <circle cx={CX} cy={CY} r="250" fill="url(#bgGlow)" />
+        {DAYS.map((d, i) => (
+          <g key={d}>
+            <circle cx={CX} cy={CY} r={52 + i * 44} fill="none" stroke="#22e5ff" strokeOpacity={0.12 + i * 0.03} strokeDasharray={i % 2 ? '2 4' : ''} />
+            <text x={CX + 4} y={CY - (52 + i * 44) - 4} fill="#22e5ff" fillOpacity=".5" fontSize="10" fontFamily="JetBrains Mono">{d.slice(0, 1)}</text>
+          </g>
+        ))}
+        {DEPTS.map((dept, i) => {
+          const a = (-90 + i * sector) * (Math.PI / 180);
+          const m = (-90 + i * sector + sector / 2) * (Math.PI / 180);
+          return (
+            <g key={dept}>
+              <line x1={CX} y1={CY} x2={CX + 245 * Math.cos(a)} y2={CY + 245 * Math.sin(a)} stroke="#22e5ff" strokeOpacity=".1" />
+              <text x={CX + 252 * Math.cos(m)} y={CY + 252 * Math.sin(m)} fill={DEPT_COLOR[dept]} fontSize="12" fontWeight="700"
+                textAnchor="middle" dominantBaseline="middle" fontFamily="Noto Sans KR">{dept}</text>
+            </g>
+          );
+        })}
+        <g className="sweep">
+          <path d={`M${CX},${CY} L${CX + 240},${CY} A240,240 0 0,0 ${CX + 240 * Math.cos(-0.5)},${CY + 240 * Math.sin(-0.5)} Z`} fill="url(#sweepGrad)" />
+          <line x1={CX} y1={CY} x2={CX + 240} y2={CY} stroke="#22e5ff" strokeOpacity=".7" />
+        </g>
+        {links.map(([a, b]) => (
+          <line key={a.id + b.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ff2e55" strokeWidth="1.5" strokeDasharray="4 3" opacity=".8">
+            <animate attributeName="stroke-dashoffset" from="0" to="-14" dur="0.8s" repeatCount="indefinite" />
+          </line>
+        ))}
+        {nodes.map((n) => {
+          const color = n.isConflict ? '#ff2e55' : n.resolved ? '#2bff88' : DEPT_COLOR[n.dept] ?? '#22e5ff';
+          const active = hover === n.id;
+          return (
+            <g key={n.id} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(null)}
+               onClick={() => n.isConflict && onOpen(n)} style={{ cursor: n.isConflict ? 'pointer' : 'default' }}>
+              {n.isConflict && [0, 0.6].map((delay) => (
+                <circle key={delay} cx={n.x} cy={n.y} r="7" fill="none" stroke="#ff2e55" strokeWidth="2">
+                  <animate attributeName="r" values="7;24" dur="1.2s" begin={`${delay}s`} repeatCount="indefinite" />
+                  <animate attributeName="opacity" values=".9;0" dur="1.2s" begin={`${delay}s`} repeatCount="indefinite" />
+                </circle>
+              ))}
+              <circle cx={n.x} cy={n.y} r="14" fill="transparent" />
+              <circle cx={n.x} cy={n.y} r={active ? 9 : 7} fill={color} filter="url(#glow)">
+                {n.isConflict && <animate attributeName="opacity" values="1;.35;1" dur="0.9s" repeatCount="indefinite" />}
+              </circle>
+              {(active || n.isConflict) && (
+                <text x={n.x} y={n.y - 14} fill={color} fontSize="10.5" textAnchor="middle" fontFamily="Noto Sans KR" fontWeight="500"
+                  style={{ paintOrder: 'stroke', stroke: '#05060d', strokeWidth: 3 }}>{n.title}</text>
+              )}
+            </g>
+          );
+        })}
+        <circle cx={CX} cy={CY} r="4" fill="#22e5ff" filter="url(#glow)" />
+      </svg>
+      <div className="flex flex-wrap justify-center gap-4 mt-2 font-mono text-[11px] text-slate-400">
+        <span><span className="inline-block w-2 h-2 rounded-full bg-neon-red mr-1 animate-pulse" />충돌 (클릭)</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-neon-green mr-1" />조정 완료</span>
+        <span>안쪽 링 = 월 → 바깥 = 금</span>
+      </div>
+    </div>
+  );
+}
+
+function Heatmap({ tasks }) {
+  const grid = useMemo(() => heat(tasks), [tasks]);
+  return (
+    <div className="panel p-4">
+      <div className="flex flex-wrap justify-between items-center gap-2">
+        <PanelTitle tag="03" title="WEEKLY LOAD HEATMAP" />
+        <div className="flex items-center gap-3 font-mono text-[10px] text-slate-400 mb-3">
+          <Legend c="rgba(43,255,136,.3)" t="여유" />
+          <Legend c="rgba(43,255,136,.55)" t="1건" />
+          <Legend c="rgba(255,176,32,.6)" t="2건" />
+          <Legend c="#b0002a" t="충돌·과밀" />
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <div className="min-w-[560px]">
+          <div className="grid gap-1 mb-1" style={{ gridTemplateColumns: `56px repeat(${HOURS.length}, 1fr)` }}>
+            <div />
+            {HOURS.map((h) => <div key={h} className="font-mono text-[10px] text-slate-500 text-center">{String(h).padStart(2, '0')}:00</div>)}
+          </div>
+          {grid.map((row, i) => (
+            <div key={DAYS[i]} className="grid gap-1 mb-1" style={{ gridTemplateColumns: `56px repeat(${HOURS.length}, 1fr)` }}>
+              <div className="font-display text-xs text-neon-cyan flex items-center">{DAYS[i].slice(0, 1)} <span className="ml-1 text-slate-500 font-sans">{DAYS[i].slice(1)}</span></div>
+              {row.map((c) => (
+                <div key={c.h}
+                  title={c.active.length ? c.active.map((t) => `[${t.dept}] ${t.title}`).join('\n') : '여유 시간'}
+                  className={`h-9 border transition-all duration-700 flex items-center justify-center font-mono text-[11px] ${c.conflict ? 'cell-hot animate-pulse text-white' : 'text-white/70'}`}
+                  style={cellStyle(c)}>
+                  {c.active.length || ''}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Legend({ c, t }) {
+  return <span className="flex items-center gap-1"><span className="w-3 h-3 inline-block" style={{ background: c }} />{t}</span>;
+}
+
+function PanelTitle({ tag, title }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <span className="font-mono text-[10px] text-neon-pink">[{tag}]</span>
+      <h2 className="font-display text-sm tracking-[.2em] text-slate-200">{title}</h2>
+      <span className="flex-1 h-px bg-gradient-to-r from-neon-cyan/40 to-transparent w-12" />
+    </div>
+  );
+}
+
+function useTyping(text, speed = 18) {
+  const [out, setOut] = useState('');
+  useEffect(() => {
+    setOut('');
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setOut(text.slice(0, i));
+      if (i >= text.length) clearInterval(id);
+    }, speed);
+    return () => clearInterval(id);
+  }, [text]);
+  return out;
+}
+
+function ConflictModal({ task, tasks, onClose, onApply }) {
+  const partners = tasks.filter((t) => task.conflictWith.includes(t.id));
+  const pair = [task, ...partners];
+  const mover = pair.find((t) => t.suggestedDay && t.suggestedDay !== t.day);
+  const typed = useTyping(task.suggestion || '');
+  const sev = { high: ['HIGH RISK', 'bg-neon-red'], medium: ['MEDIUM', 'bg-neon-amber'], low: ['LOW', 'bg-slate-500'] }[task.severity] ?? ['RISK', 'bg-neon-red'];
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="panel modal-in w-full max-w-2xl p-6 relative max-h-[90vh] overflow-y-auto"
+        style={{ borderColor: 'rgba(255,46,85,.5)', boxShadow: '0 0 60px rgba(255,46,85,.25)' }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <div className="font-mono text-[10px] tracking-[.3em] text-neon-red">⚠ SCHEDULE COLLISION DETECTED</div>
+            <h3 className="font-display text-xl text-white mt-1">일정 충돌 분석</h3>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`${sev[1]} text-void font-display text-[10px] font-bold px-2 py-1 tracking-widest`}>{sev[0]}</span>
+            <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none" aria-label="닫기">✕</button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-center gap-3 mb-5">
+          {pair.slice(0, 2).map((t, i) => (
+            <React.Fragment key={t.id}>
+              {i === 1 && <div className="text-center font-display text-neon-red text-lg animate-pulse">⇄</div>}
+              <div className="border border-neon-red/40 bg-neon-red/5 p-3">
+                <div className="text-xs font-bold" style={{ color: DEPT_COLOR[t.dept] }}>{t.dept}</div>
+                <div className="text-white font-medium">{t.title}</div>
+                <div className="font-mono text-xs text-slate-400 mt-1">{t.day} {t.start}:00 – {t.end}:00</div>
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+
+        <section className="mb-4">
+          <div className="font-mono text-[11px] text-neon-red tracking-widest mb-1">&gt; 충돌 사유</div>
+          <p className="text-slate-200 text-sm leading-relaxed border-l-2 border-neon-red pl-3">{task.reason}</p>
+        </section>
+
+        <section className="mb-6">
+          <div className="font-mono text-[11px] text-neon-green tracking-widest mb-1">&gt; AI 일정 조정 제안</div>
+          <div className="bg-black/40 border border-neon-green/30 p-3">
+            {mover && (
+              <div className="font-mono text-xs text-neon-green mb-2">
+                {mover.title}: {mover.day} → <span className="font-bold text-white">{mover.suggestedDay}</span>
+              </div>
+            )}
+            <p className={`text-sm text-slate-200 leading-relaxed ${typed.length < (task.suggestion || '').length ? 'cursor' : ''}`}>{typed}</p>
+          </div>
+        </section>
+
+        <div className="flex flex-col sm:flex-row gap-3 justify-end">
+          <button onClick={onClose} className="px-4 py-2 border border-slate-600 text-slate-300 hover:border-slate-400 font-display text-xs tracking-widest">나중에</button>
+          <button onClick={() => onApply(pair.map((t) => t.id), mover)} disabled={!mover}
+            className="px-5 py-2 bg-neon-green text-void font-display text-xs font-bold tracking-widest hover:shadow-[0_0_20px_#2bff88] transition disabled:opacity-40">
+            ✓ AI 제안 적용
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditModal({ initial, onClose, onSubmit }) {
+  const [text, setText] = useState(JSON.stringify(initial, null, 2));
+  const [err, setErr] = useState('');
+  const submit = () => {
+    try {
+      const v = JSON.parse(text);
+      if (!Array.isArray(v)) throw new Error('배열이어야 합니다');
+      onSubmit(v);
+    } catch (e) { setErr(e.message); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="panel modal-in w-full max-w-2xl p-6" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-display text-lg text-white mb-1">주간업무 입력</h3>
+        <p className="text-xs text-slate-400 mb-3">형식: {'[{"부서":"ICT","업무":"서버 점검","날짜":"수요일","시간":"09:00-13:00"}]'}</p>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
+          className="w-full h-80 bg-black/50 border border-neon-cyan/30 text-neon-cyan font-mono text-xs p-3 outline-none focus:border-neon-cyan" />
+        {err && <div className="text-neon-red text-xs mt-2">{err}</div>}
+        <div className="flex justify-end gap-3 mt-4">
+          <button onClick={onClose} className="px-4 py-2 border border-slate-600 text-slate-300 font-display text-xs tracking-widest">취소</button>
+          <button onClick={submit} className="px-5 py-2 bg-neon-cyan text-void font-display text-xs font-bold tracking-widest">▶ AI 분석</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Toast({ msg }) {
+  if (!msg) return null;
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 modal-in panel px-5 py-3 text-sm text-neon-green border-neon-green/50 max-w-[90vw]">
+      {msg}
+    </div>
+  );
+}
+
+function toInput(tasks) {
+  return tasks.map((t) => ({
+    부서: t.dept, 업무: t.title, 날짜: t.day,
+    시간: `${String(t.start).padStart(2, '0')}:00-${String(t.end).padStart(2, '0')}:00`,
+  }));
+}
+
+function App() {
+  const [data, setData] = useState(null);
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [hover, setHover] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [toast, setToast] = useState('');
+
+  const load = async (input) => {
+    setLoading(true);
+    try {
+      const res = await fetchAnalysis(input);
+      setData(res); setTasks(res.tasks);
+    } catch (e) {
+      const res = window.OFFLINE_DATA;
+      if (res) { setData(res); setTasks(res.tasks); }
+      flash('서버에 연결할 수 없어 오프라인 데모 데이터를 표시합니다');
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 3200); };
+
+  const applySuggestion = (ids, mover) => {
+    setTasks((prev) => prev.map((t) => {
+      if (!ids.includes(t.id)) return t;
+      const moved = mover && t.id === mover.id;
+      return { ...t, day: moved ? t.suggestedDay : t.day, isConflict: false, resolved: true, conflictWith: [] };
+    }));
+    setSelected(null);
+    if (mover) flash(`✓ '${mover.title}' 일정을 ${mover.suggestedDay}로 이동했습니다`);
+  };
+
+  const stats = {
+    total: tasks.length,
+    conflicts: tasks.filter((t) => t.isConflict).length / 2,
+    resolved: tasks.filter((t) => t.resolved).length / 2,
+  };
+
+  return (
+    <div className="grid-bg min-h-screen">
+      <div className="max-w-[1400px] mx-auto px-4 py-6 md:px-8">
+        <Header data={data} stats={stats} loading={loading} onAnalyze={() => load(toInput(tasks))} onEdit={() => setEditing(true)} />
+
+        <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-5 mb-5">
+          <TaskList tasks={tasks} hover={hover} setHover={setHover} onOpen={setSelected} />
+          <Radar tasks={tasks} hover={hover} setHover={setHover} onOpen={setSelected} engine={data?.engine} />
+        </div>
+        <Heatmap tasks={tasks} />
+
+        <footer className="mt-6 font-mono text-[10px] text-slate-600 text-center tracking-widest">
+          GRIDSYNC v0.1 · AI SCHEDULE ORCHESTRATOR · {data?.engine ?? '---'}
+        </footer>
+      </div>
+
+      {selected && <ConflictModal task={tasks.find((t) => t.id === selected.id) ?? selected} tasks={tasks} onClose={() => setSelected(null)} onApply={applySuggestion} />}
+      {editing && <EditModal initial={toInput(tasks)} onClose={() => setEditing(false)} onSubmit={(v) => { setEditing(false); load(v); }} />}
+      {loading && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-void/70 backdrop-blur-sm">
+          <div className="font-display text-neon-cyan tracking-[.4em] animate-pulse glow-text">AI SCANNING SCHEDULES…</div>
+        </div>
+      )}
+      <Toast msg={toast} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
